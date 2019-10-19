@@ -1,1 +1,138 @@
+---
+title: "Biopeak R Package Implementation"
+author: "David Lauenstein"
+date: "`r Sys.Date()`"
+bibliography: references.bib
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Biopeak R Package Implementation}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\usepackage[utf8]{inputenc}
+---
 
+## 1 Overview
+
+The Biopeak R package enables the user to systematically identify and visualize impulse-like gene expression changes within short genomic series experiments. On a systems level, this tool allows to characterize dynamic gene expression signatures underlying biological processes. In order to detect such activation peaks, the gene expression is treated as a signal that propagates along the experimental axis (time, temperature or other series conditions).
+
+## 2 Peak Detection with the Biopeak package
+
+To demonstrate the functionality of this package, we are using a dataset comprising transcriptional profiles of human epithelial cells in response to heat available on GEO (GSE7458) [@heatpub]. In vitro cultured HEp2 cells were heated at 37 to 43 °C for 60 min and microarray gene expression profiles were acquired at 37, 40, 41, 42 and 43 °C.
+
+In a first step, we load the heat-shock data:
+
+```{r load heat}
+library(Biopeak)
+# load the heat-shock data
+exprmat <- heat
+# Show first rows and columns of the expression matrix
+head(exprmat)
+# Transform data frame to numeric matrix
+exprmat <- as.matrix(exprmat)
+```
+
+One of the strengths of the peak detection algorithm lays in its great flexibility to process data source-independently. While the main focus of this package is aimed at the characterization of genomic data, in theory, any type of series experiment that can be described as a signal could be analyzed. Since peaks are assessed for each gene relative to its expression over time or over the course of different stimuli strenghts, prior normalization steps are usualy not required. Therefore, we can directly subject the Rna-Seq or microarray count expression matrix to the peak detection algorithm: the peakDetection function.
+
+The peakDetection function takes as input the expression matrix and the series description, a numeric vector which defines the conditions/time-points of sample acquisition. In order to identify biomarkers which are specific to a distinct phase of the observed biological process, we provide a set of tunable filters that define the characterstics of a peak. Peak characteristics that have to be defined are: 
+
+* activation strength (actstrength): Threshold for minimal activation relative to the mean expression across all conditions.
+*	prominence: Threshold for minimal peak prominence relative to the second highest peak. In simple terms: how much higher does the mainpeak have to be relative to the second highest peak. If set to 1, multiple peaks per gene are allowed.
+* type: Definition of study type with possible values 'microarray' or 'rnaseq'. 
+
+Furthermore, the function supports optional parameters for more complex operations:
+
+* minimum expression (minexpr): Threshold for minimal mean expression across all condition for a given gene.
+* background correction (bgcorr): Background noise correction. Genes with an expression lower than the 5 % quantile of the entire expression matrix are discarded.
+* peakwidth: Minimal number of conditions/time-points that a peak spans (based on sustact threshold).
+* sustained activation (sustact): Threshold for minimal peakheight relative to the main peak to be considered as sustained activation.
+
+In this case study, we are primarily interested in finding genes that peak at a single condition, in order to identify gene activation thresholds under heat-shock conditions. Thus, we set the prominence parameter to 1.3, to select for genes that feature a peak that is at least 30 % higher in magnitude than any other peak. Moreover, we want to filter out peaks with low heights relative to the mean expression. Therefore the actstrength parameter is set to 1.5, selecting for peaks that feature at least 50 % higher expression than the mean expression of that gene. Lastly, we selected only the top 50 % expressed genes, to reduce the computational load.
+
+```{r peakdetection}
+# define condition series
+series <- c(37,40,41,42,43)
+# Find the expression limit for the 50 % highest expressing genes and selec them
+exprlim <- quantile(exprmat, probs <- seq(0,1,0.01))[51]
+exprmat <- exprmat[which(rowMeans(exprmat) > exprlim),]
+# run the peak detection algorithm
+peakdet <- peakDetection(exprmat, series, type ='rnaseq', actstrength = 1.5, prominence = 1.3,
+                         bgcorr = F)
+```
+
+The peakDetection function returns a set of vectors and matrices:
+
+* peakgenes: A character vector of gene symbols for which a peak has been identified
+* peakloc: A numeric vector containing the location of each peak.
+* peakheight: A numeric vector containing the absolute height of each peak.
+* neighbors: A numeric matrix containing time-points with sustained activation. Conditions/time-points with sustained activation are ranked by their distance to the main peak which always has value 1. Thus, a time-point with a value of 3 is 3-1 = 2 conditions/time-points away from the main peak. Conditions with value 0 show no sustained activation. If the peakwidth parameter is set greater than 0, the output of the peakDetection function can be used to filter for genes with sustained activation within the main peak neighborhood.
+
+## 3 Discovering the temporal regulation of activated biomarkers
+
+The output of the peakDetection function provides a format that facilitates queries on a gene-level and systems-level.
+
+```{r output}
+# number of genes detected by the peakDetection function
+length(peakdet$peakgenes)
+# filter for genes which peak at 43 °C
+peakdet$peakgenes[which(peakdet$peakloc == 43)]
+# return the peakheight and location of the gene CDK13
+c(peakdet$peakheight[which(peakdet$peakgenes == 'CDK13')],
+  peakdet$peakloc[which(peakdet$peakgenes == 'CDK13')])
+# assess the main peak neighborhood for sustained activation
+peakdet$neighbors[which(peakdet$peakgenes == 'CDK13'),]
+```
+
+The plotExpression function allows to plot the expression signal of individual genes:
+
+### 3.1 Plot the expression signal of individual genes
+
+```{r plotexpression,fig.cap="\\label{fig:plotexpression}Figure 1: Individual gene expression signal for CDK13. The dashed line marks the main peak location.", fig.align = 'center', fig.height = 4, fig.width = 5}
+plotExpression(exprmat,'CDK13',series,peakdet)
+```
+
+### 3.2 Gene co-expression analysis
+
+Gene co-expression analyses are a widely used tool in genomic studies. In this package we provide the getCormat function which calculates a gene-wise correlation matrix and plots a bi-clustered heatmap. The function returns both the heatmap object and the re-ordered correlation matrix:
+
+```{r gettcormat,fig.cap="\\label{fig:getcormat}Figure 2: Bi-clustered heatmap of the gene correlation matrix", fig.align = 'center'}
+dev.off()
+corobjects <- getCormat(peakdet, exprmat, method = 'spearman')
+# extract heatmap object
+corheatmap <- corobjects$hm
+# extract re-ordered correlation matrix
+cormatrix <- corobjects$hm_cormat
+# inspect the first 5 x 5 gene-wise correlation of the correlation matrix returned by plotCormat
+cormatrix[1:5,1:5]
+```
+
+### 3.3 Identification of biomarker clusters with similar gene regulation
+
+The peakDetection algorithm represents a powerful tool for the exhaustive identification of condition or time-point specific biomarkers. For the analysis of the temporal gene expression and given enough time-points, those time-points can be further grouped together to reflect waves of gene activation, such as an immediate, early, mid and late response. Since in most explorative studies the number of such waves underlying a given biological process is unknown, the Biopeak package provides a cluster exploration function: findClusters. The findClusters function estimates the number of genes with similar temporal regulation and supports three different clustering algorithms: kmeans, dbscan and hierarchical clustering. Clustering is based on a PCA projection of the input data and cluster assignment and parameters are returned by the function.
+
+```{r findclusters, fig.height = 10, fig.width = 6,fig.cap="\\label{fig:findclusters}Figure 3: Clusters of biomarkers with similar temporal regulation based on three different algorithms (hclust, dbscan and kmeans).", fig.align = 'center'}
+# display all plots in one graph
+par(mfrow = c(3,1))
+# cluster exploration using hierarchical clustering based on 3 clusters
+clusters <-findClusters(peakdet, exprmat, method = 'hclust', clusters = 3)
+# cluster exploration using dbscan (density-based) with an epsilon parameter of 0.02
+clusters <- findClusters(peakdet, exprmat, method = 'dbscan', eps = 0.1)
+# cluster exploration using kmeans with a maximum of 5 clusters to be assigned
+clusters <- findClusters(peakdet, exprmat, maxclusters = 3, method = 'kmeans')
+```
+
+### 3.4 Plot selected biomarkers in a heatmap
+
+The plotHeatmap function represents a simple wrapper function that takes the output of the peakDetection function and normalizes the expression to log2 values for improved visualization before subjecting it to the heatmap.2 function. The clustermembers parameter is optional and allows to select for specific genes. Here, we take the output of the findClusters function and plot a heatmap for one of the clusters:
+
+```{r plotheatmap,fig.cap="\\label{fig:plotheatmap}Figure 4: Heatmap of the second cluster returned by the findClusters function. The second cluster reflects primarily genes involved in the immediate LPS-induced response.",fig.height = 8, fig.align = 'center'}
+heatmap <- plotHeatmap(peakdet, exprmat, clustermembers = clusters$clustermembers[[3]])
+```
+
+### 3.5 Save the peak detection output to a text file
+
+The function saveOutput saves the output of the peakDetetection funtion (peakgenes, peaklocation and peakheight) to a text file. 
+
+```{r saveOutput}
+saveOutput(peakdet,file.path(tempdir(),'heat_out.txt'))
+```
+
+## 4 References
