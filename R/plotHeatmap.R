@@ -50,3 +50,49 @@ plotHeatmap <- function(peakdet, exprmat, clustermembers = c()){
   }
   heatmap.2(expr,col=rev(brewer.pal(8,"RdYlBu")),breaks=seq(-1,1,0.25),trace='none', Rowv = T)
 }
+
+##updates:
+
+expr = exprmat
+for (i in 1:dim(expr)[1]){ # normalize to log2
+  meanexpr <- mean(expr[i,])
+  for (j in 1:dim(expr)[2]){
+    if (expr[i,j]>0){
+      expr[i,j] <- log(expr[i,j]/meanexpr,2)
+    }
+    else{
+      expr[i,j] <- log((expr[i,j]+.Machine$double.eps)/meanexpr,2)
+    }
+  }
+}
+
+
+library(pheatmap)
+
+data(heat)
+heat = as.matrix(heat)
+series <- c(37,40,41,42,43)
+peakdet <- peakDetection(heat, series, type ='rnaseq', actstrength = 1.5,
+                         prominence = 1.3, minexpr = 1000)
+
+
+genes = peakdet$peakgenes[which(peakdet$peakloc == 40 | peakdet$peakloc == 43)]
+
+genes = sub("//.*", "", genes)
+
+cormat = cor(t(heat[which(rownames(heat) %in% genes),]))
+
+exprmat_sel = heat[which(rownames(heat) %in% genes),]
+
+anno = data.frame(peakdet$peakloc[which(peakdet$peakloc == 40 |
+                                          peakdet$peakloc == 43)])
+
+rownames(anno) = genes
+colnames(anno) = "Peak Loc: Temp"
+anno$`Peak Location: Temp` = as.factor(anno$`Peak Location: Temp`)
+
+pheatmap(cormat, annotation_row = anno, border_color = F)
+
+pheatmap(scale(exprmat_sel),annotation_row = anno, border_color = T)
+
+
