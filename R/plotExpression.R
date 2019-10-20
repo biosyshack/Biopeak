@@ -33,3 +33,40 @@ plotExpression <- function(exprmat, gene, series, peakdet){
   clip(0,max(series),0,max(exprmat[which(tolower(rownames(exprmat)) == tolower(gene)),]))
   abline(v =  peakdet$peakloc[which(tolower(peakdet$peakgenes) == tolower(gene))], lty = 2)
 }
+
+colpal = "Blues"
+
+exprmat = heat
+peakdet <- peakDetection(heat, series, type ='rnaseq', actstrength = 1.5, prominence = 1.3, minexpr = 400)
+
+
+genes = peakdet$peakgenes[which(peakdet$peakloc == 40)]
+
+plotExpression2 <- function(exprmat, genes, series, peakdet, colpal = "Dark2"){
+
+}
+
+exprmat_sel = c()
+for (gene in genes){
+  geneseries = data.frame(cbind(cbind(series,exprmat[which(tolower(rownames(exprmat)) == tolower(gene)),])))
+  geneseries= cbind(geneseries,rep(gene,dim(exprmat)[2]))
+  colnames(geneseries) = c("Series", "Expression", "Gene")
+  exprmat_sel = rbind(exprmat_sel,geneseries)
+}
+
+
+ggplot(data=exprmat_sel, aes(x = Series, y = Expression)) +
+  #geom_point()+
+  geom_area(aes(color = Gene, fill = Gene), alpha = 0.8)+
+  #geom_line(aes(y = Expression), position = "stack")+
+  theme_minimal()+
+  scale_color_brewer(palette=colpal)+
+  scale_fill_brewer(palette=colpal)
+
+
+# ggplot(data=exprmat_sel, aes(x = Series, y = Expression)) +
+#   geom_point(aes(col = Gene))+
+#   geom_line(aes(col = Gene))+
+#   theme_minimal()+
+#   scale_color_brewer(palette=colpal)
+
